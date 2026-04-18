@@ -806,6 +806,7 @@ function solithiumWizard() {
         session_key:       this.sessionKey ?? '',
         items:             JSON.stringify(items),
         accessories:       JSON.stringify(accessories),
+        lines:             JSON.stringify(lines),
         services:          JSON.stringify(services),
         grand_total:       this.grandTotal,
         client_email:      this.regEmail,
@@ -820,15 +821,26 @@ function solithiumWizard() {
           if (lines.length > 0) {
             await this._post({
               action: 'slwiz_add_to_cart',
-              items:  JSON.stringify(items),
+              items:  JSON.stringify([...items, ...accessories]),
               lang:   this.lang,
-            }).catch(() => {}); // Non bloquant
+            }).catch((err) => { console.warn('add_to_cart failed after quote', err); }); // Non bloquant
           }
 
-          this.quoteSuccess = res.data?.message
+          const baseMsg = res.data?.message
             ?? (this.lang === 'fr'
               ? 'Votre demande a été envoyée ! Nous vous contacterons sous peu.'
               : 'Your request has been sent! We will contact you shortly.');
+
+          if (res.data?.order_id) {
+            const orderMsg = this.lang === 'fr'
+              ? `Commande WooCommerce créée : <strong>#${res.data.order_id}</strong>.`
+              : `WooCommerce order created: <strong>#${res.data.order_id}</strong>.`;
+            const accountLabel = this.lang === 'fr' ? 'Voir mon compte' : 'View my account';
+            const accountPath = this.lang === 'fr' ? '/mon-compte/' : '/my-account/';
+            this.quoteSuccess = `${baseMsg}<br>${orderMsg} <a href="${window.slwizParams?.siteUrl ?? ''}${accountPath}">${accountLabel} →</a>`;
+          } else {
+            this.quoteSuccess = baseMsg;
+          }
         } else {
           this.quoteError = res.data?.message
             ?? (this.lang === 'fr' ? 'Erreur lors de l\'envoi.' : 'Error while sending.');
