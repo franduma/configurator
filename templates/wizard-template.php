@@ -565,7 +565,7 @@ if ( ! defined( 'ABSPATH' ) ) exit;
                 <button class="slwiz-btn-secondary" @click="step = 10" x-text="__('back')"></button>
                 <button class="slwiz-btn-primary"
                         :disabled="cartTotal <= 0"
-                        @click="step = 12"
+                        @click="step = 12; $nextTick(() => { const el = document.getElementById('solithium-wizard'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); })"
                         x-text="__('nextToServices')">
                 </button>
             </div>
@@ -669,7 +669,7 @@ if ( ! defined( 'ABSPATH' ) ) exit;
             </div>
 
             <div class="slwiz-nav">
-                <button class="slwiz-btn-secondary" @click="step = 11" x-text="__('back')"></button>
+                <button class="slwiz-btn-secondary" @click="step = 11; $nextTick(() => { const el = document.getElementById('solithium-wizard'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); })" x-text="__('back')"></button>
             </div>
         </section>
 

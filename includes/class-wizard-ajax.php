@@ -267,10 +267,34 @@ class Solithium_Ajax {
 
         foreach ( $items as $item ) {
             $product_id = (int)($item['wc_product_id'] ?? 0);
+            $variation_id = (int)($item['wc_variation_id'] ?? 0);
+            $variation_attrs = $item['wc_variation_attrs'] ?? [];
+            if ( ! is_array( $variation_attrs ) ) {
+                $variation_attrs = [];
+            }
+            $variation_attrs = array_map( 'wc_clean', $variation_attrs );
+
+            if ( ! $product_id && function_exists( 'wc_get_product_id_by_sku' ) ) {
+                $sku = sanitize_text_field( (string) ( $item['sku'] ?? '' ) );
+                if ( $sku !== '' ) {
+                    $product_id = (int) wc_get_product_id_by_sku( $sku );
+                }
+            }
+
+            // Si le SKU résout une variation, convertir vers (parent + variation)
+            if ( $product_id ) {
+                $product_obj = wc_get_product( $product_id );
+                if ( $product_obj && $product_obj->is_type( 'variation' ) ) {
+                    $variation_id    = (int) $product_obj->get_id();
+                    $variation_attrs = (array) $product_obj->get_variation_attributes();
+                    $product_id      = (int) $product_obj->get_parent_id();
+                }
+            }
+
             $qty        = (int)($item['qty'] ?? 1);
             if ( ! $product_id ) continue;
 
-            $result = WC()->cart->add_to_cart( $product_id, $qty );
+            $result = WC()->cart->add_to_cart( $product_id, $qty, $variation_id, $variation_attrs );
             if ( $result ) {
                 $added[] = $product_id;
             } else {
@@ -305,6 +329,7 @@ class Solithium_Ajax {
         $services    = json_decode( self::get_post_raw( 'services',    '{}' ), true ) ?? [];
         $items       = json_decode( self::get_post_raw( 'items',       '[]' ), true ) ?? [];
         $accessories = json_decode( self::get_post_raw( 'accessories', '[]' ), true ) ?? [];
+        $lines       = json_decode( self::get_post_raw( 'lines',       '[]' ), true ) ?? [];
 
         // Récupérer la session
         $session_data = $session_key ? get_transient( 'slwiz_' . $session_key ) : null;
@@ -316,11 +341,32 @@ class Solithium_Ajax {
         $client_email = $user ? $user->user_email : self::get_post( 'client_email', '' );
         if ( ! $client_name ) $client_name = $user ? $user->display_name : '—';
 
-        // Calcul du total
-        $grand_total = 0;
-        $all_items   = array_merge( $items, $accessories );
-        foreach ( $all_items as $it ) {
-            $grand_total += (float)( $it['price'] ?? 0 ) * (int)( $it['qty'] ?? 1 );
+        // Normaliser les lignes pour éviter un total vide en cas de payload incomplet
+        $all_items = array_merge( $items, $accessories );
+        if ( empty( $all_items ) && is_array( $lines ) ) {
+            foreach ( $lines as $line ) {
+                $qty = (int) ( $line['qty'] ?? 1 );
+                $total = (float) ( $line['total'] ?? 0 );
+                $all_items[] = [
+                    'name'  => sanitize_text_field( (string) ( $line['name'] ?? '' ) ),
+                    'qty'   => $qty > 0 ? $qty : 1,
+                    'price' => $qty > 0 ? $total / $qty : 0,
+                ];
+            }
+        }
+
+        // Calcul du total (priorité au total front s'il est valide)
+        $grand_total = (float) self::get_post( 'grand_total', 0 );
+        if ( $grand_total <= 0 ) {
+            foreach ( $all_items as $it ) {
+                $grand_total += (float)( $it['price'] ?? 0 ) * (int)( $it['qty'] ?? 1 );
+            }
+        }
+
+        // Créer une commande WooCommerce (statut pending) si possible
+        $order_id = 0;
+        if ( ! SLWIZ_DEMO_MODE && function_exists( 'wc_create_order' ) && ! empty( $items ) ) {
+            $order_id = self::create_wc_order_from_items( $items, $user ? (int) $user->ID : 0, $services, $client_email );
         }
 
         // Courriel de notification — destinataire Solithium
@@ -336,11 +382,12 @@ class Solithium_Ajax {
             'client_name'  => $client_name,
             'client_email' => $client_email,
             'needs'        => $needs,
-            'items'        => $items,
-            'accessories'  => $accessories,
+            'items'        => $all_items,
+            'accessories'  => [],
             'services'     => $services,
             'grand_total'  => $grand_total,
             'currency'     => $currency,
+            'order_id'     => $order_id,
         ]);
 
         wp_mail( $notif_to, $subject_solithium, $body_solithium, [
@@ -362,6 +409,8 @@ class Solithium_Ajax {
                 'currency'     => $currency,
                 'phone'        => $phone,
                 'services'     => $services,
+                'items'        => $all_items,
+                'order_id'     => $order_id,
             ]);
 
             wp_mail( $client_email, $subject_client, $body_client, [
@@ -372,6 +421,7 @@ class Solithium_Ajax {
 
         wp_send_json_success([
             'sent'    => true,
+            'order_id' => $order_id,
             'message' => $lang === 'fr'
                 ? 'Votre demande a été envoyée avec succès. Vous recevrez une confirmation par courriel.'
                 : 'Your request has been sent successfully. You will receive a confirmation by email.',
@@ -460,6 +510,18 @@ class Solithium_Ajax {
                     : '<p>📞 A member of our team will call you back shortly at <strong>' . esc_html( $d['services']['phone'] ?? '' ) . '</strong>.</p>' )
             : '';
 
+        $items_html = '';
+        foreach ( (array) ( $d['items'] ?? [] ) as $it ) {
+            $name  = esc_html( (string) ( $it['name'] ?? '' ) );
+            $qty   = (int) ( $it['qty'] ?? 1 );
+            $price = (float) ( $it['price'] ?? 0 );
+            $items_html .= "<tr><td style='padding:4px 8px'>{$name}</td><td style='padding:4px 8px;text-align:center'>{$qty}</td><td style='padding:4px 8px;text-align:right'>{$d['currency']}" . number_format( $qty * $price, 2 ) . "</td></tr>";
+        }
+
+        $order_info = ! empty( $d['order_id'] )
+            ? '<p><strong>' . ( $fr ? 'Commande WooCommerce créée' : 'WooCommerce order created' ) . ' #' . (int) $d['order_id'] . '</strong></p>'
+            : '';
+
         return "<!DOCTYPE html><html><body style='font-family:Arial,sans-serif;color:#222;max-width:600px;margin:auto'>
 <div style='background:#1a2332;padding:20px 30px'>
   <h1 style='color:#f5a623;margin:0;font-size:1.3rem'>☀ Solithium</h1>
@@ -469,6 +531,15 @@ class Solithium_Ajax {
   <p>" . ( $fr ? 'Nous avons bien reçu votre demande de configuration solaire. Notre équipe va l\'examiner et communiquera avec vous dans les plus brefs délais.'
                : 'We have received your solar configuration request. Our team will review it and get back to you as soon as possible.' ) . "</p>
   {$callback_note}
+  {$order_info}
+  <table style='width:100%;border-collapse:collapse;border:1px solid #ddd;margin:12px 0 20px'>
+    <thead><tr style='background:#2e8b57;color:#fff'>
+      <th style='padding:6px 8px;text-align:left'>" . ( $fr ? 'Produit' : 'Product' ) . "</th>
+      <th style='padding:6px 8px;text-align:center'>Qté</th>
+      <th style='padding:6px 8px;text-align:right'>" . ( $fr ? 'Montant' : 'Amount' ) . "</th>
+    </tr></thead>
+    <tbody>{$items_html}</tbody>
+  </table>
   <div style='background:#e8f5ee;border-left:4px solid #2e8b57;padding:12px 16px;margin:20px 0;border-radius:4px'>
     <strong>" . ( $fr ? 'Total estimé de votre sélection :' : 'Estimated total of your selection:' ) . " " . $d['currency'] . number_format( $d['grand_total'], 2 ) . "</strong>
   </div>
@@ -478,6 +549,81 @@ class Solithium_Ajax {
 <div style='background:#f5f5f5;padding:12px 30px;font-size:.8rem;color:#999'>
   Solithium 2 · " . get_site_url() . "
 </div></body></html>";
+    }
+
+    /**
+     * Crée une commande WooCommerce pending à partir des items wizard.
+     */
+    private static function create_wc_order_from_items( array $items, int $user_id, array $services, string $client_email ): int {
+        try {
+            $order = wc_create_order( [ 'customer_id' => max( 0, $user_id ) ] );
+            if ( ! $order ) {
+                return 0;
+            }
+
+            foreach ( $items as $item ) {
+                $product_id = (int) ( $item['wc_product_id'] ?? 0 );
+                $variation_id = (int) ( $item['wc_variation_id'] ?? 0 );
+                $variation_attrs = $item['wc_variation_attrs'] ?? [];
+                if ( ! is_array( $variation_attrs ) ) {
+                    $variation_attrs = [];
+                }
+
+                if ( ! $product_id && function_exists( 'wc_get_product_id_by_sku' ) ) {
+                    $sku = sanitize_text_field( (string) ( $item['sku'] ?? '' ) );
+                    if ( $sku !== '' ) {
+                        $product_id = (int) wc_get_product_id_by_sku( $sku );
+                    }
+                }
+
+                if ( $product_id ) {
+                    $product_obj = wc_get_product( $product_id );
+                    if ( $product_obj && $product_obj->is_type( 'variation' ) ) {
+                        $variation_id    = (int) $product_obj->get_id();
+                        $variation_attrs = (array) $product_obj->get_variation_attributes();
+                        $product_id      = (int) $product_obj->get_parent_id();
+                        $product_obj     = wc_get_product( $variation_id );
+                    }
+
+                    if ( ! $product_obj ) {
+                        $product_obj = wc_get_product( $product_id );
+                    }
+
+                    if ( $product_obj ) {
+                        $qty = max( 1, (int) ( $item['qty'] ?? 1 ) );
+                        $args = [];
+                        if ( $variation_id > 0 ) {
+                            $args['variation_id'] = $variation_id;
+                            $args['variation']    = $variation_attrs;
+                        }
+                        $order->add_product( $product_obj, $qty, $args );
+                    }
+                }
+            }
+
+            if ( ! $order->get_items() ) {
+                $order->delete( true );
+                return 0;
+            }
+
+            if ( $client_email ) {
+                $order->set_billing_email( sanitize_email( $client_email ) );
+            }
+
+            $order->update_meta_data( '_slwiz_service_installer', sanitize_text_field( (string) ( $services['installer'] ?? '' ) ) );
+            $order->update_meta_data( '_slwiz_service_delivery', sanitize_text_field( (string) ( $services['delivery'] ?? '' ) ) );
+            $order->update_meta_data( '_slwiz_service_callback', ! empty( $services['callback'] ) ? '1' : '0' );
+            $order->update_meta_data( '_slwiz_service_phone', sanitize_text_field( (string) ( $services['phone'] ?? '' ) ) );
+            $order->update_meta_data( '_slwiz_service_notes', sanitize_textarea_field( (string) ( $services['notes'] ?? '' ) ) );
+
+            $order->calculate_totals();
+            $order->set_status( 'pending' );
+            $order->save();
+
+            return (int) $order->get_id();
+        } catch ( \Throwable $e ) {
+            return 0;
+        }
     }
 
     /* ───────────────────────────────────────────────
