@@ -697,6 +697,8 @@ function solithiumWizard() {
             price:         unitPrice,
             sku:           p.sku ?? '',
             wc_product_id: p.wc_product_id ?? 0,
+            wc_variation_id: p.wc_variation_id ?? 0,
+            wc_variation_attrs: p.wc_variation_attrs ?? {},
           });
         } catch {}
       });

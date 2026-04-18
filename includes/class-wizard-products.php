@@ -496,7 +496,7 @@ class Solithium_Products {
             'status' => 'publish',
             'limit'  => -1,
             'return' => 'objects',
-            'type'   => [ 'simple', 'variation' ],
+            'type'   => [ 'simple', 'variable' ],
         ] );
 
         $groups = [
@@ -578,6 +578,21 @@ class Solithium_Products {
         $sku        = (string) $product->get_sku();
         $product_id = (int) $product->get_id();
         $price      = (float) wc_get_price_to_display( $product );
+        $variation_id = 0;
+        $variation_attrs = [];
+
+        if ( $product->is_type( 'variable' ) ) {
+            $selected_variation = self::pick_variable_variation( $product );
+            if ( empty( $selected_variation['variation_id'] ) ) {
+                return [];
+            }
+            $variation_id    = (int) $selected_variation['variation_id'];
+            $variation_attrs = (array) ( $selected_variation['variation_attrs'] ?? [] );
+            $price           = (float) ( $selected_variation['price'] ?? $price );
+            if ( ! empty( $selected_variation['sku'] ) ) {
+                $sku = (string) $selected_variation['sku'];
+            }
+        }
 
         $item = [
             'id'            => 'WC-' . $product_id,
@@ -586,6 +601,8 @@ class Solithium_Products {
             'name_en'       => $name,
             'price'         => $price,
             'wc_product_id' => $product_id,
+            'wc_variation_id'    => $variation_id,
+            'wc_variation_attrs' => $variation_attrs,
             'specs'         => [],
         ];
 
@@ -615,5 +632,34 @@ class Solithium_Products {
         }
 
         return 0;
+    }
+
+    /**
+     * Sélectionne une variation achetable pour un produit variable.
+     */
+    private static function pick_variable_variation( WC_Product $product ): array {
+        if ( ! $product->is_type( 'variable' ) ) {
+            return [];
+        }
+
+        $children = $product->get_children();
+        foreach ( $children as $variation_id ) {
+            $variation = wc_get_product( (int) $variation_id );
+            if ( ! $variation || ! $variation->is_type( 'variation' ) ) {
+                continue;
+            }
+            if ( ! $variation->is_purchasable() ) {
+                continue;
+            }
+
+            return [
+                'variation_id'   => (int) $variation->get_id(),
+                'variation_attrs'=> (array) $variation->get_variation_attributes(),
+                'price'          => (float) wc_get_price_to_display( $variation ),
+                'sku'            => (string) $variation->get_sku(),
+            ];
+        }
+
+        return [];
     }
 }
