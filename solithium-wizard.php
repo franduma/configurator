@@ -90,6 +90,7 @@ function slwiz_enqueue() {
         'ajaxUrl'          => admin_url( 'admin-ajax.php' ),
         'nonce'            => wp_create_nonce( 'slwiz_nonce' ),
         'isLoggedIn'       => is_user_logged_in() ? 1 : 0,
+        'currentLang'      => slwiz_get_current_lang(),
         'loginUrl'         => wp_login_url( get_permalink() ),
         'demoMode'         => SLWIZ_DEMO_MODE ? 1 : 0,
         'currency'         => function_exists( 'get_woocommerce_currency_symbol' ) ? get_woocommerce_currency_symbol() : '$',
@@ -106,4 +107,30 @@ function slwiz_enqueue() {
         [],
         SLWIZ_VERSION
     );
+}
+
+/**
+ * Détermine la langue de la page courante.
+ * Priorité: Polylang > locale WP > fallback FR.
+ *
+ * @return string "fr" ou "en"
+ */
+function slwiz_get_current_lang() {
+    $lang = '';
+
+    if ( function_exists( 'pll_current_language' ) ) {
+        $lang = (string) pll_current_language( 'slug' );
+    }
+
+    if ( '' === $lang ) {
+        $lang = (string) determine_locale();
+    }
+
+    $lang = strtolower( $lang );
+
+    if ( str_starts_with( $lang, 'en' ) ) {
+        return 'en';
+    }
+
+    return 'fr';
 }
