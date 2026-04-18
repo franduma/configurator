@@ -17,7 +17,7 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 define( 'SLWIZ_VERSION',  '1.1.0' );
 define( 'SLWIZ_DIR',      plugin_dir_path( __FILE__ ) );
 define( 'SLWIZ_URL',      plugin_dir_url( __FILE__ ) );
-define( 'SLWIZ_DEMO_MODE', true ); // true = catalogue fictif; false = produits WooCommerce réels
+define( 'SLWIZ_DEMO_MODE', false ); // true = catalogue fictif; false = produits WooCommerce réels
 
 /* ───────────────────────────────────────────────
    CHARGEMENT DES CLASSES / LOAD CLASSES
