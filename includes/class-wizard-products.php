@@ -492,45 +492,128 @@ class Solithium_Products {
      * prix / IDs produits réels de la base WooCommerce.
      */
     private static function get_live_catalog(): array {
-        $catalog = self::get_demo_catalog();
+        $all_wc_products = wc_get_products( [
+            'status' => 'publish',
+            'limit'  => -1,
+            'return' => 'objects',
+            'type'   => [ 'simple', 'variation' ],
+        ] );
 
-        foreach ( $catalog as $group_key => $items ) {
-            if ( ! is_array( $items ) ) {
+        $groups = [
+            'panels'      => [ 'panel', 'panneau', 'solar-panel', 'solaire' ],
+            'batteries'   => [ 'battery', 'batterie', 'lifepo4', 'accumulator' ],
+            'inverters'   => [ 'inverter', 'onduleur', 'convertisseur', 'hybrid' ],
+            'controllers' => [ 'controller', 'controleur', 'régulateur', 'regulateur', 'mppt' ],
+            'mounting'    => [ 'mount', 'montage', 'rack', 'structure', 'support' ],
+            'cabling'     => [ 'cable', 'câble', 'wiring', 'connecteur', 'connector' ],
+        ];
+
+        $catalog_live = [];
+        foreach ( $groups as $group_key => $keywords ) {
+            $catalog_live[ $group_key ] = self::filter_wc_products_by_keywords( $all_wc_products, $keywords, $group_key );
+        }
+
+        // Fallback démo uniquement pour les groupes vides.
+        $catalog_demo = self::get_demo_catalog();
+        foreach ( $catalog_demo as $group_key => $items ) {
+            if ( empty( $catalog_live[ $group_key ] ) ) {
+                $catalog_live[ $group_key ] = $items;
+            }
+        }
+
+        return $catalog_live;
+    }
+
+    private static function filter_wc_products_by_keywords( array $products, array $keywords, string $group_key ): array {
+        $items = [];
+
+        foreach ( $products as $product ) {
+            if ( ! $product instanceof WC_Product ) {
                 continue;
             }
 
-            $live_items = [];
-
-            foreach ( $items as $item ) {
-                $sku        = (string) ( $item['sku'] ?? '' );
-                $product_id = $sku ? (int) wc_get_product_id_by_sku( $sku ) : 0;
-
-                if ( ! $product_id ) {
-                    continue;
-                }
-
-                $product = wc_get_product( $product_id );
-                if ( ! $product ) {
-                    continue;
-                }
-
-                $item['wc_product_id'] = $product_id;
-                $item['price']         = (float) wc_get_price_to_display( $product );
-
-                $product_name = (string) $product->get_name();
-                if ( $product_name !== '' ) {
-                    $item['name_fr'] = $product_name;
-                    $item['name_en'] = $product_name;
-                }
-
-                $live_items[] = $item;
+            $haystack = self::wc_product_search_string( $product );
+            if ( ! self::contains_any_keyword( $haystack, $keywords ) ) {
+                continue;
             }
 
-            // Si aucun produit live trouvé dans un groupe, fallback sur la démo
-            // pour éviter de casser complètement l'expérience.
-            $catalog[ $group_key ] = ! empty( $live_items ) ? $live_items : $items;
+            $mapped = self::map_wc_product_to_item( $product, $group_key );
+            if ( ! empty( $mapped ) ) {
+                $items[] = $mapped;
+            }
         }
 
-        return $catalog;
+        return $items;
+    }
+
+    private static function wc_product_search_string( WC_Product $product ): string {
+        $parts = [
+            (string) $product->get_name(),
+            (string) $product->get_sku(),
+        ];
+
+        $terms = get_the_terms( $product->get_id(), 'product_cat' );
+        if ( is_array( $terms ) ) {
+            foreach ( $terms as $term ) {
+                $parts[] = (string) $term->name;
+                $parts[] = (string) $term->slug;
+            }
+        }
+
+        return strtolower( implode( ' ', $parts ) );
+    }
+
+    private static function contains_any_keyword( string $haystack, array $keywords ): bool {
+        foreach ( $keywords as $keyword ) {
+            if ( str_contains( $haystack, strtolower( (string) $keyword ) ) ) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static function map_wc_product_to_item( WC_Product $product, string $group_key ): array {
+        $name       = (string) $product->get_name();
+        $sku        = (string) $product->get_sku();
+        $product_id = (int) $product->get_id();
+        $price      = (float) wc_get_price_to_display( $product );
+
+        $item = [
+            'id'            => 'WC-' . $product_id,
+            'sku'           => $sku !== '' ? $sku : 'WC-' . $product_id,
+            'name_fr'       => $name,
+            'name_en'       => $name,
+            'price'         => $price,
+            'wc_product_id' => $product_id,
+            'specs'         => [],
+        ];
+
+        $name_lc = strtolower( $name . ' ' . $sku );
+
+        if ( $group_key === 'panels' ) {
+            $item['voltage'] = self::extract_number( $name_lc, '/(12|24|48)\s*v/');
+            $item['watts']   = self::extract_number( $name_lc, '/(\d{2,4})\s*w/');
+            $item['specs']   = [ 'Surface / Area' => '1.8' ];
+        } elseif ( $group_key === 'batteries' ) {
+            $item['voltage'] = self::extract_number( $name_lc, '/(12|24|48)\s*v/');
+            $item['ah']      = self::extract_number( $name_lc, '/(\d{2,4})\s*ah/');
+            $item['wh']      = max( 1, (int) ( ( $item['voltage'] ?: 12 ) * ( $item['ah'] ?: 100 ) ) );
+        } elseif ( $group_key === 'inverters' ) {
+            $item['voltage'] = self::extract_number( $name_lc, '/(12|24|48)\s*v/');
+            $item['watts']   = self::extract_number( $name_lc, '/(\d{2,5})\s*w/');
+        } elseif ( $group_key === 'controllers' ) {
+            $item['amps']    = self::extract_number( $name_lc, '/(\d{1,3})\s*a/');
+        }
+
+        return $item;
+    }
+
+    private static function extract_number( string $text, string $pattern ): int {
+        if ( preg_match( $pattern, $text, $matches ) ) {
+            return (int) $matches[1];
+        }
+
+        return 0;
     }
 }
