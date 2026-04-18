@@ -267,10 +267,34 @@ class Solithium_Ajax {
 
         foreach ( $items as $item ) {
             $product_id = (int)($item['wc_product_id'] ?? 0);
+            $variation_id = (int)($item['wc_variation_id'] ?? 0);
+            $variation_attrs = $item['wc_variation_attrs'] ?? [];
+            if ( ! is_array( $variation_attrs ) ) {
+                $variation_attrs = [];
+            }
+            $variation_attrs = array_map( 'wc_clean', $variation_attrs );
+
+            if ( ! $product_id && function_exists( 'wc_get_product_id_by_sku' ) ) {
+                $sku = sanitize_text_field( (string) ( $item['sku'] ?? '' ) );
+                if ( $sku !== '' ) {
+                    $product_id = (int) wc_get_product_id_by_sku( $sku );
+                }
+            }
+
+            // Si le SKU résout une variation, convertir vers (parent + variation)
+            if ( $product_id ) {
+                $product_obj = wc_get_product( $product_id );
+                if ( $product_obj && $product_obj->is_type( 'variation' ) ) {
+                    $variation_id    = (int) $product_obj->get_id();
+                    $variation_attrs = (array) $product_obj->get_variation_attributes();
+                    $product_id      = (int) $product_obj->get_parent_id();
+                }
+            }
+
             $qty        = (int)($item['qty'] ?? 1);
             if ( ! $product_id ) continue;
 
-            $result = WC()->cart->add_to_cart( $product_id, $qty );
+            $result = WC()->cart->add_to_cart( $product_id, $qty, $variation_id, $variation_attrs );
             if ( $result ) {
                 $added[] = $product_id;
             } else {
