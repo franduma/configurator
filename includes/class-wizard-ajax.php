@@ -267,6 +267,12 @@ class Solithium_Ajax {
 
         foreach ( $items as $item ) {
             $product_id = (int)($item['wc_product_id'] ?? 0);
+            if ( ! $product_id && function_exists( 'wc_get_product_id_by_sku' ) ) {
+                $sku = sanitize_text_field( (string) ( $item['sku'] ?? '' ) );
+                if ( $sku !== '' ) {
+                    $product_id = (int) wc_get_product_id_by_sku( $sku );
+                }
+            }
             $qty        = (int)($item['qty'] ?? 1);
             if ( ! $product_id ) continue;
 

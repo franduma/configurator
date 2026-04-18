@@ -442,9 +442,14 @@ function solithiumWizard() {
        INITIALISATION
     ══════════════════════════════════════ */
     init() {
-      // Détecter la langue du navigateur
-      const browserLang = (navigator.language || 'fr').toLowerCase();
-      this.lang = browserLang.startsWith('en') ? 'en' : 'fr';
+      // Langue de la page WP (Polylang) en priorité; fallback navigateur.
+      const pageLang = (window.slwizParams?.currentLang || '').toLowerCase();
+      if (pageLang === 'fr' || pageLang === 'en') {
+        this.lang = pageLang;
+      } else {
+        const browserLang = (navigator.language || 'fr').toLowerCase();
+        this.lang = browserLang.startsWith('en') ? 'en' : 'fr';
+      }
 
       // Si l'utilisateur WP est déjà connecté (via slwizParams)
       if (window.slwizParams?.isLoggedIn === 1) {

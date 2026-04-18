@@ -405,7 +405,7 @@ class Solithium_Products {
        les besoins calculés.
     ─────────────────────────────────────────────── */
     public static function get_recommendations( array $needs ): array {
-        $catalog = self::get_demo_catalog();
+        $catalog = self::get_catalog();
         $v       = (int)($needs['system_voltage'] ?? 24);
         $panel_w = (int)($needs['panel_capacity_w'] ?? 0);
         $batt_ah = (float)($needs['batt_capacity_ah'] ?? 0);
@@ -473,5 +473,64 @@ class Solithium_Products {
             'mounting'    => $mount_opts,
             'cabling'     => $cable_opts,
         ];
+    }
+
+    /**
+     * Retourne le catalogue actif (démo ou WooCommerce live).
+     */
+    private static function get_catalog(): array {
+        if ( SLWIZ_DEMO_MODE || ! function_exists( 'wc_get_product_id_by_sku' ) ) {
+            return self::get_demo_catalog();
+        }
+
+        return self::get_live_catalog();
+    }
+
+    /**
+     * Construit un catalogue basé sur WooCommerce en partant des SKU de démo.
+     * Cela permet de garder la logique métier existante tout en utilisant les
+     * prix / IDs produits réels de la base WooCommerce.
+     */
+    private static function get_live_catalog(): array {
+        $catalog = self::get_demo_catalog();
+
+        foreach ( $catalog as $group_key => $items ) {
+            if ( ! is_array( $items ) ) {
+                continue;
+            }
+
+            $live_items = [];
+
+            foreach ( $items as $item ) {
+                $sku        = (string) ( $item['sku'] ?? '' );
+                $product_id = $sku ? (int) wc_get_product_id_by_sku( $sku ) : 0;
+
+                if ( ! $product_id ) {
+                    continue;
+                }
+
+                $product = wc_get_product( $product_id );
+                if ( ! $product ) {
+                    continue;
+                }
+
+                $item['wc_product_id'] = $product_id;
+                $item['price']         = (float) wc_get_price_to_display( $product );
+
+                $product_name = (string) $product->get_name();
+                if ( $product_name !== '' ) {
+                    $item['name_fr'] = $product_name;
+                    $item['name_en'] = $product_name;
+                }
+
+                $live_items[] = $item;
+            }
+
+            // Si aucun produit live trouvé dans un groupe, fallback sur la démo
+            // pour éviter de casser complètement l'expérience.
+            $catalog[ $group_key ] = ! empty( $live_items ) ? $live_items : $items;
+        }
+
+        return $catalog;
     }
 }
