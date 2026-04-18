@@ -266,30 +266,10 @@ class Solithium_Ajax {
         $errors = [];
 
         foreach ( $items as $item ) {
-            $product_id = (int)($item['wc_product_id'] ?? 0);
-            $variation_id = (int)($item['wc_variation_id'] ?? 0);
-            $variation_attrs = $item['wc_variation_attrs'] ?? [];
-            if ( ! is_array( $variation_attrs ) ) {
-                $variation_attrs = [];
-            }
-            $variation_attrs = array_map( 'wc_clean', $variation_attrs );
-
-            if ( ! $product_id && function_exists( 'wc_get_product_id_by_sku' ) ) {
-                $sku = sanitize_text_field( (string) ( $item['sku'] ?? '' ) );
-                if ( $sku !== '' ) {
-                    $product_id = (int) wc_get_product_id_by_sku( $sku );
-                }
-            }
-
-            // Si le SKU résout une variation, convertir vers (parent + variation)
-            if ( $product_id ) {
-                $product_obj = wc_get_product( $product_id );
-                if ( $product_obj && $product_obj->is_type( 'variation' ) ) {
-                    $variation_id    = (int) $product_obj->get_id();
-                    $variation_attrs = (array) $product_obj->get_variation_attributes();
-                    $product_id      = (int) $product_obj->get_parent_id();
-                }
-            }
+            $resolved = self::resolve_wc_target_from_item( $item );
+            $product_id = (int) ( $resolved['product_id'] ?? 0 );
+            $variation_id = (int) ( $resolved['variation_id'] ?? 0 );
+            $variation_attrs = (array) ( $resolved['variation_attrs'] ?? [] );
 
             $qty        = (int)($item['qty'] ?? 1);
             if ( ! $product_id ) continue;
@@ -562,32 +542,13 @@ class Solithium_Ajax {
             }
 
             foreach ( $items as $item ) {
-                $product_id = (int) ( $item['wc_product_id'] ?? 0 );
-                $variation_id = (int) ( $item['wc_variation_id'] ?? 0 );
-                $variation_attrs = $item['wc_variation_attrs'] ?? [];
-                if ( ! is_array( $variation_attrs ) ) {
-                    $variation_attrs = [];
-                }
-
-                if ( ! $product_id && function_exists( 'wc_get_product_id_by_sku' ) ) {
-                    $sku = sanitize_text_field( (string) ( $item['sku'] ?? '' ) );
-                    if ( $sku !== '' ) {
-                        $product_id = (int) wc_get_product_id_by_sku( $sku );
-                    }
-                }
+                $resolved = self::resolve_wc_target_from_item( $item );
+                $product_id = (int) ( $resolved['product_id'] ?? 0 );
+                $variation_id = (int) ( $resolved['variation_id'] ?? 0 );
+                $variation_attrs = (array) ( $resolved['variation_attrs'] ?? [] );
 
                 if ( $product_id ) {
-                    $product_obj = wc_get_product( $product_id );
-                    if ( $product_obj && $product_obj->is_type( 'variation' ) ) {
-                        $variation_id    = (int) $product_obj->get_id();
-                        $variation_attrs = (array) $product_obj->get_variation_attributes();
-                        $product_id      = (int) $product_obj->get_parent_id();
-                        $product_obj     = wc_get_product( $variation_id );
-                    }
-
-                    if ( ! $product_obj ) {
-                        $product_obj = wc_get_product( $product_id );
-                    }
+                    $product_obj = $variation_id > 0 ? wc_get_product( $variation_id ) : wc_get_product( $product_id );
 
                     if ( $product_obj ) {
                         $qty = max( 1, (int) ( $item['qty'] ?? 1 ) );
@@ -597,6 +558,19 @@ class Solithium_Ajax {
                             $args['variation']    = $variation_attrs;
                         }
                         $order->add_product( $product_obj, $qty, $args );
+                    }
+                } else {
+                    // Fallback: conserver la trace de la ligne dans la commande
+                    // même si aucun produit WC exact n'a pu être résolu.
+                    $line_name = sanitize_text_field( (string) ( $item['name'] ?? 'Item' ) );
+                    $qty = max( 1, (int) ( $item['qty'] ?? 1 ) );
+                    $line_total = (float) ( $item['price'] ?? 0 ) * $qty;
+                    if ( $line_total > 0 ) {
+                        $fee = new WC_Order_Item_Fee();
+                        $fee->set_name( $line_name . ( $qty > 1 ? " × {$qty}" : '' ) );
+                        $fee->set_amount( $line_total );
+                        $fee->set_total( $line_total );
+                        $order->add_item( $fee );
                     }
                 }
             }
@@ -624,6 +598,61 @@ class Solithium_Ajax {
         } catch ( \Throwable $e ) {
             return 0;
         }
+    }
+
+    /**
+     * Résout un item wizard vers une cible WooCommerce.
+     * Priorité: wc_product_id > SKU > nom produit.
+     *
+     * @return array{product_id:int,variation_id:int,variation_attrs:array}
+     */
+    private static function resolve_wc_target_from_item( array $item ): array {
+        $product_id = (int) ( $item['wc_product_id'] ?? 0 );
+        $variation_id = (int) ( $item['wc_variation_id'] ?? 0 );
+        $variation_attrs = $item['wc_variation_attrs'] ?? [];
+        if ( ! is_array( $variation_attrs ) ) {
+            $variation_attrs = [];
+        }
+        $variation_attrs = array_map( 'wc_clean', $variation_attrs );
+
+        if ( ! $product_id && function_exists( 'wc_get_product_id_by_sku' ) ) {
+            $sku = sanitize_text_field( (string) ( $item['sku'] ?? '' ) );
+            if ( $sku !== '' ) {
+                $product_id = (int) wc_get_product_id_by_sku( $sku );
+            }
+        }
+
+        // Fallback de correspondance par nom de produit
+        if ( ! $product_id ) {
+            $name = sanitize_text_field( (string) ( $item['name'] ?? '' ) );
+            if ( $name !== '' ) {
+                $matched = wc_get_products( [
+                    'status' => 'publish',
+                    'limit'  => 1,
+                    'search' => $name,
+                    'return' => 'ids',
+                ] );
+                if ( ! empty( $matched ) ) {
+                    $product_id = (int) $matched[0];
+                }
+            }
+        }
+
+        // Si ID résout une variation, convertir vers (parent + variation)
+        if ( $product_id ) {
+            $product_obj = wc_get_product( $product_id );
+            if ( $product_obj && $product_obj->is_type( 'variation' ) ) {
+                $variation_id    = (int) $product_obj->get_id();
+                $variation_attrs = (array) $product_obj->get_variation_attributes();
+                $product_id      = (int) $product_obj->get_parent_id();
+            }
+        }
+
+        return [
+            'product_id'      => $product_id,
+            'variation_id'    => $variation_id,
+            'variation_attrs' => $variation_attrs,
+        ];
     }
 
     /* ───────────────────────────────────────────────
