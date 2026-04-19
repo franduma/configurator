@@ -565,7 +565,7 @@ if ( ! defined( 'ABSPATH' ) ) exit;
                 <button class="slwiz-btn-secondary" @click="step = 10" x-text="__('back')"></button>
                 <button class="slwiz-btn-primary"
                         :disabled="cartTotal <= 0"
-                        @click="step = 12"
+                        @click="step = 12; $nextTick(() => { const el = document.getElementById('solithium-wizard'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); })"
                         x-text="__('nextToServices')">
                 </button>
             </div>
@@ -634,6 +634,13 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 
             <!-- Notes additionnelles -->
             <div class="slwiz-group">
+                <h3 x-text="__('clientNameTitle')"></h3>
+                <input type="text" x-model="clientName" class="slwiz-input" required
+                       :placeholder="__('clientNamePlaceholder')">
+            </div>
+
+            <!-- Notes additionnelles -->
+            <div class="slwiz-group">
                 <h3 x-text="__('notesTitle')"></h3>
                 <textarea x-model="serviceNotes" rows="3" class="slwiz-textarea"
                           :placeholder="__('notesPlaceholder')"></textarea>
@@ -660,7 +667,7 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 
                 <div x-show="!quoteSuccess">
                     <button class="slwiz-btn-primary slwiz-btn-large"
-                            :disabled="!serviceInstaller || !serviceDelivery || grandTotal <= 0 || quoteLoading"
+                            :disabled="!serviceInstaller || !serviceDelivery || !clientName || grandTotal <= 0 || quoteLoading"
                             @click="doFinalizeQuote()"
                             x-text="quoteLoading ? __('sending') : __('finalizeBtn')">
                     </button>
@@ -669,7 +676,7 @@ if ( ! defined( 'ABSPATH' ) ) exit;
             </div>
 
             <div class="slwiz-nav">
-                <button class="slwiz-btn-secondary" @click="step = 11" x-text="__('back')"></button>
+                <button class="slwiz-btn-secondary" @click="step = 11; $nextTick(() => { const el = document.getElementById('solithium-wizard'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); })" x-text="__('back')"></button>
             </div>
         </section>
 
