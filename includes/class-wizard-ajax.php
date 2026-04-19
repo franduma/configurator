@@ -349,10 +349,22 @@ class Solithium_Ajax {
             $order_id = self::create_wc_order_from_items( $items, $user ? (int) $user->ID : 0, $services, $client_email );
         }
 
+        $currency = '$';
+
+        if ( $user && ! empty( $user->ID ) ) {
+            self::save_user_quote( (int) $user->ID, [
+                'created_at'  => current_time( 'mysql' ),
+                'grand_total' => $grand_total,
+                'currency'    => $currency,
+                'items'       => $all_items,
+                'services'    => $services,
+                'order_id'    => $order_id,
+            ] );
+        }
+
         // Courriel de notification — destinataire Solithium
         $notif_to   = get_option( 'slwiz_notification_email', get_option( 'admin_email' ) );
         $site_name  = get_bloginfo( 'name' );
-        $currency   = '$';
 
         $subject_solithium = $lang === 'fr'
             ? "[Solithium Wizard] Nouvelle demande de {$client_name}"
@@ -391,6 +403,9 @@ class Solithium_Ajax {
                 'services'     => $services,
                 'items'        => $all_items,
                 'order_id'     => $order_id,
+                'cart_url'     => function_exists( 'wc_get_cart_url' ) ? wc_get_cart_url() : '',
+                'account_url'  => function_exists( 'wc_get_page_permalink' ) ? wc_get_page_permalink( 'myaccount' ) : '',
+                'shop_url'     => function_exists( 'wc_get_page_permalink' ) ? wc_get_page_permalink( 'shop' ) : '',
             ]);
 
             wp_mail( $client_email, $subject_client, $body_client, [
@@ -501,6 +516,20 @@ class Solithium_Ajax {
         $order_info = ! empty( $d['order_id'] )
             ? '<p><strong>' . ( $fr ? 'Commande WooCommerce créée' : 'WooCommerce order created' ) . ' #' . (int) $d['order_id'] . '</strong></p>'
             : '';
+        $links_html = '';
+        if ( ! empty( $d['cart_url'] ) || ! empty( $d['account_url'] ) || ! empty( $d['shop_url'] ) ) {
+            $links_html .= '<p>';
+            if ( ! empty( $d['cart_url'] ) ) {
+                $links_html .= '<a href="' . esc_url( $d['cart_url'] ) . '">' . ( $fr ? 'Voir le panier' : 'View cart' ) . '</a> · ';
+            }
+            if ( ! empty( $d['account_url'] ) ) {
+                $links_html .= '<a href="' . esc_url( $d['account_url'] ) . '">' . ( $fr ? 'Mon compte' : 'My account' ) . '</a> · ';
+            }
+            if ( ! empty( $d['shop_url'] ) ) {
+                $links_html .= '<a href="' . esc_url( $d['shop_url'] ) . '">' . ( $fr ? 'Boutique' : 'Shop' ) . '</a>';
+            }
+            $links_html .= '</p>';
+        }
 
         return "<!DOCTYPE html><html><body style='font-family:Arial,sans-serif;color:#222;max-width:600px;margin:auto'>
 <div style='background:#1a2332;padding:20px 30px'>
@@ -512,6 +541,7 @@ class Solithium_Ajax {
                : 'We have received your solar configuration request. Our team will review it and get back to you as soon as possible.' ) . "</p>
   {$callback_note}
   {$order_info}
+  {$links_html}
   <table style='width:100%;border-collapse:collapse;border:1px solid #ddd;margin:12px 0 20px'>
     <thead><tr style='background:#2e8b57;color:#fff'>
       <th style='padding:6px 8px;text-align:left'>" . ( $fr ? 'Produit' : 'Product' ) . "</th>
@@ -653,6 +683,25 @@ class Solithium_Ajax {
             'variation_id'    => $variation_id,
             'variation_attrs' => $variation_attrs,
         ];
+    }
+
+    /**
+     * Sauvegarde le devis dans le compte utilisateur (max 3).
+     */
+    private static function save_user_quote( int $user_id, array $quote ): void {
+        if ( $user_id <= 0 ) {
+            return;
+        }
+
+        $quotes = get_user_meta( $user_id, 'slwiz_quotes', true );
+        if ( ! is_array( $quotes ) ) {
+            $quotes = [];
+        }
+
+        array_unshift( $quotes, $quote );
+        $quotes = array_slice( $quotes, 0, 3 );
+
+        update_user_meta( $user_id, 'slwiz_quotes', $quotes );
     }
 
     /* ───────────────────────────────────────────────
