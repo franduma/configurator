@@ -148,6 +148,8 @@ const SLWIZ_STRINGS = {
     callbackYes: 'Je souhaite être rappelé(e) par l\'équipe Solithium',
     callbackPhone: 'Votre numéro de téléphone',
     callbackPhonePlaceholder: 'ex. 514-555-0100',
+    clientNameTitle: 'Nom du client',
+    clientNamePlaceholder: 'Nom complet du client (saisi manuellement)',
     notesTitle: 'Notes additionnelles (optionnel)',
     notesPlaceholder: 'Questions, contraintes particulières, dates souhaitées…',
     summaryTitle: 'Récapitulatif de votre commande',
@@ -294,6 +296,8 @@ const SLWIZ_STRINGS = {
     callbackYes: 'I would like the Solithium team to call me back',
     callbackPhone: 'Your phone number',
     callbackPhonePlaceholder: 'e.g. 514-555-0100',
+    clientNameTitle: 'Client name',
+    clientNamePlaceholder: 'Customer full name (manual entry)',
     notesTitle: 'Additional notes (optional)',
     notesPlaceholder: 'Questions, special constraints, preferred dates…',
     summaryTitle: 'Your order summary',
@@ -431,6 +435,7 @@ function solithiumWizard() {
     serviceCallback:  false,
     servicePhone:     '',
     serviceNotes:     '',
+    clientName:       '',
 
     /* ── TOTAL FINAL ──────────────────────── */
     grandTotal:   0,
@@ -442,9 +447,14 @@ function solithiumWizard() {
        INITIALISATION
     ══════════════════════════════════════ */
     init() {
-      // Détecter la langue du navigateur
-      const browserLang = (navigator.language || 'fr').toLowerCase();
-      this.lang = browserLang.startsWith('en') ? 'en' : 'fr';
+      // Langue de la page WP (Polylang) en priorité; fallback navigateur.
+      const pageLang = (window.slwizParams?.currentLang || '').toLowerCase();
+      if (pageLang === 'fr' || pageLang === 'en') {
+        this.lang = pageLang;
+      } else {
+        const browserLang = (navigator.language || 'fr').toLowerCase();
+        this.lang = browserLang.startsWith('en') ? 'en' : 'fr';
+      }
 
       // Si l'utilisateur WP est déjà connecté (via slwizParams)
       if (window.slwizParams?.isLoggedIn === 1) {
@@ -660,8 +670,6 @@ function solithiumWizard() {
 
     cartLines() {
       const lines = [];
-      const mapKey = { panel: 'panels', battery: 'batteries', inverter: 'inverter',
-                       controller: 'controller', mounting: 'mounting', cabling: 'cabling' };
 
       Object.entries(this.selectedProducts).forEach(([key, raw]) => {
         if (!raw) return;
@@ -677,16 +685,65 @@ function solithiumWizard() {
       return lines;
     },
 
+    selectedComponentItems() {
+      const items = [];
+
+      Object.values(this.selectedProducts).forEach((raw) => {
+        if (!raw) return;
+        try {
+          const p = typeof raw === 'string' ? JSON.parse(raw) : raw;
+          const qty = p.qty_needed ?? 1;
+          const lineTotal = p.total_price ?? p.price ?? 0;
+          const unitPrice = Math.round((lineTotal / (qty || 1)) * 100) / 100;
+
+          items.push({
+            name:          this.lang === 'fr' ? p.name_fr : p.name_en,
+            qty,
+            price:         unitPrice,
+            sku:           p.sku ?? '',
+            wc_product_id: p.wc_product_id ?? 0,
+            wc_variation_id: p.wc_variation_id ?? 0,
+            wc_variation_attrs: p.wc_variation_attrs ?? {},
+          });
+        } catch {}
+      });
+
+      return items;
+    },
+
+    selectedAccessoryItems() {
+      const items = [];
+      this.selectedAccessories.forEach(id => {
+        const acc = this.accessories.find(a => a.id === id);
+        if (!acc) return;
+        items.push({
+          name:          this.lang === 'fr' ? acc.name_fr : acc.name_en,
+          qty:           1,
+          price:         acc.price ?? 0,
+          sku:           acc.sku ?? '',
+          wc_product_id: acc.wc_product_id ?? 0,
+        });
+      });
+      return items;
+    },
+
+    goToStep(step) {
+      this.step = step;
+      requestAnimationFrame(() => {
+        const root = document.getElementById('solithium-wizard');
+        if (root) root.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    },
+
     async doAddToCart() {
       this.cartLoading = true;
       this.cartError   = '';
       this.cartSuccess = '';
 
-      const items = this.cartLines().map(l => ({
-        name:  l.name,
-        qty:   l.qty,
-        price: Math.round((l.total / (l.qty || 1)) * 100) / 100,
-      }));
+      const items = [
+        ...this.selectedComponentItems(),
+        ...this.selectedAccessoryItems(),
+      ];
 
       try {
         const res = await this._post({
@@ -739,20 +796,26 @@ function solithiumWizard() {
 
       // Construire le payload de la commande
       const lines = this.allCartLines();
+      const items = this.selectedComponentItems();
+      const accessories = this.selectedAccessoryItems();
+      const services = {
+        installer: this.serviceInstaller ?? '',
+        delivery:  this.serviceDelivery  ?? '',
+        callback:  this.serviceCallback  ? 1 : 0,
+        phone:     this.servicePhone,
+        notes:     this.serviceNotes,
+      };
       const payload = {
         action:            'slwiz_send_quote',
         lang:              this.lang,
         session_key:       this.sessionKey ?? '',
+        items:             JSON.stringify(items),
+        accessories:       JSON.stringify(accessories),
         lines:             JSON.stringify(lines),
+        services:          JSON.stringify(services),
         grand_total:       this.grandTotal,
-        service_installer: this.serviceInstaller ?? '',
-        service_delivery:  this.serviceDelivery  ?? '',
-        service_callback:  this.serviceCallback  ? 1 : 0,
-        service_phone:     this.servicePhone,
-        service_notes:     this.serviceNotes,
         client_email:      this.regEmail,
-        client_first:      this.regFirstName,
-        client_last:       this.regLastName,
+        client_name:       this.clientName || `${this.regFirstName} ${this.regLastName}`.trim(),
       };
 
       try {
@@ -761,22 +824,28 @@ function solithiumWizard() {
         if (res.success) {
           // Ajouter au panier WooCommerce (silencieusement)
           if (lines.length > 0) {
-            const items = lines.map(l => ({
-              name:  l.name,
-              qty:   l.qty,
-              price: Math.round((l.total / (l.qty || 1)) * 100) / 100,
-            }));
             await this._post({
               action: 'slwiz_add_to_cart',
-              items:  JSON.stringify(items),
+              items:  JSON.stringify([...items, ...accessories]),
               lang:   this.lang,
-            }).catch(() => {}); // Non bloquant
+            }).catch((err) => { console.warn('add_to_cart failed after quote', err); }); // Non bloquant
           }
 
-          this.quoteSuccess = res.data?.message
+          const baseMsg = res.data?.message
             ?? (this.lang === 'fr'
               ? 'Votre demande a été envoyée ! Nous vous contacterons sous peu.'
               : 'Your request has been sent! We will contact you shortly.');
+
+          if (res.data?.order_id) {
+            const orderMsg = this.lang === 'fr'
+              ? `Commande WooCommerce créée : <strong>#${res.data.order_id}</strong>.`
+              : `WooCommerce order created: <strong>#${res.data.order_id}</strong>.`;
+            const accountLabel = this.lang === 'fr' ? 'Voir mon compte' : 'View my account';
+            const accountPath = this.lang === 'fr' ? '/mon-compte/' : '/my-account/';
+            this.quoteSuccess = `${baseMsg}<br>${orderMsg} <a href="${window.slwizParams?.siteUrl ?? ''}${accountPath}">${accountLabel} →</a>`;
+          } else {
+            this.quoteSuccess = baseMsg;
+          }
         } else {
           this.quoteError = res.data?.message
             ?? (this.lang === 'fr' ? 'Erreur lors de l\'envoi.' : 'Error while sending.');

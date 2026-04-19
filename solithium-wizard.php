@@ -17,7 +17,7 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 define( 'SLWIZ_VERSION',  '1.1.0' );
 define( 'SLWIZ_DIR',      plugin_dir_path( __FILE__ ) );
 define( 'SLWIZ_URL',      plugin_dir_url( __FILE__ ) );
-define( 'SLWIZ_DEMO_MODE', true ); // true = catalogue fictif; false = produits WooCommerce réels
+define( 'SLWIZ_DEMO_MODE', false ); // true = catalogue fictif; false = produits WooCommerce réels
 
 /* ───────────────────────────────────────────────
    CHARGEMENT DES CLASSES / LOAD CLASSES
@@ -47,6 +47,13 @@ function slwiz_activate() {
     ) {$charset};";
     require_once ABSPATH . 'wp-admin/includes/upgrade.php';
     dbDelta( $sql );
+    slwiz_register_account_endpoint();
+    flush_rewrite_rules();
+}
+
+register_deactivation_hook( __FILE__, 'slwiz_deactivate' );
+function slwiz_deactivate() {
+    flush_rewrite_rules();
 }
 
 /* ───────────────────────────────────────────────
@@ -90,6 +97,8 @@ function slwiz_enqueue() {
         'ajaxUrl'          => admin_url( 'admin-ajax.php' ),
         'nonce'            => wp_create_nonce( 'slwiz_nonce' ),
         'isLoggedIn'       => is_user_logged_in() ? 1 : 0,
+        'currentUserName'  => is_user_logged_in() ? wp_get_current_user()->display_name : '',
+        'currentLang'      => slwiz_get_current_lang(),
         'loginUrl'         => wp_login_url( get_permalink() ),
         'demoMode'         => SLWIZ_DEMO_MODE ? 1 : 0,
         'currency'         => function_exists( 'get_woocommerce_currency_symbol' ) ? get_woocommerce_currency_symbol() : '$',
@@ -106,4 +115,151 @@ function slwiz_enqueue() {
         [],
         SLWIZ_VERSION
     );
+}
+
+/* ───────────────────────────────────────────────
+   COMPTE WOOCOMMERCE — SECTION DEVIS
+─────────────────────────────────────────────── */
+add_action( 'init', 'slwiz_register_account_endpoint' );
+function slwiz_register_account_endpoint() {
+    add_rewrite_endpoint( 'slwiz-devis', EP_ROOT | EP_PAGES );
+}
+
+add_filter( 'woocommerce_account_menu_items', 'slwiz_add_quotes_menu_item' );
+function slwiz_add_quotes_menu_item( $items ) {
+    $logout = $items['customer-logout'] ?? null;
+    unset( $items['customer-logout'] );
+
+    $items['slwiz-devis'] = slwiz_get_current_lang() === 'fr' ? __( 'Devis', 'solithium-wizard' ) : __( 'Quotes', 'solithium-wizard' );
+
+    if ( null !== $logout ) {
+        $items['customer-logout'] = $logout;
+    }
+
+    return $items;
+}
+
+add_action( 'woocommerce_account_slwiz-devis_endpoint', 'slwiz_render_account_quotes' );
+function slwiz_render_account_quotes() {
+    $is_fr = slwiz_get_current_lang() === 'fr';
+
+    if ( ! is_user_logged_in() ) {
+        echo $is_fr ? '<p>Vous devez être connecté.</p>' : '<p>You must be logged in.</p>';
+        return;
+    }
+
+    $quotes = get_user_meta( get_current_user_id(), 'slwiz_quotes', true );
+    if ( ! is_array( $quotes ) || empty( $quotes ) ) {
+        echo $is_fr ? '<p>Aucun devis enregistré pour le moment.</p>' : '<p>No saved quotes yet.</p>';
+        return;
+    }
+
+    echo $is_fr ? '<h3>Mes derniers devis (max 10)</h3>' : '<h3>My latest quotes (max 10)</h3>';
+    echo '<table class="shop_table shop_table_responsive my_account_orders"><thead><tr>';
+    echo $is_fr
+        ? '<th>Date</th><th>Nom du client</th><th>Total</th><th>Produits</th><th>Services</th><th>Commande</th><th>Actions</th>'
+        : '<th>Date</th><th>Client Name</th><th>Total</th><th>Items</th><th>Services</th><th>Order</th><th>Actions</th>';
+    echo '</tr></thead><tbody>';
+
+    foreach ( $quotes as $idx => $quote ) {
+        $date = esc_html( $quote['created_at'] ?? '—' );
+        $total = esc_html( ( $quote['currency'] ?? '$' ) . number_format( (float) ( $quote['grand_total'] ?? 0 ), 2 ) );
+        $client_name = esc_html( $quote['client_name'] ?? '—' );
+        $items_list = '';
+        if ( is_array( $quote['items'] ?? null ) ) {
+            foreach ( $quote['items'] as $item ) {
+                $n = esc_html( (string) ( $item['name'] ?? '' ) );
+                $q = (int) ( $item['qty'] ?? 1 );
+                $items_list .= '<div>' . $n . ( $q > 1 ? ' × ' . $q : '' ) . '</div>';
+            }
+        }
+        if ( '' === $items_list ) $items_list = '—';
+
+        $services = is_array( $quote['services'] ?? null ) ? $quote['services'] : [];
+        $installer_raw = (string) ( $services['installer'] ?? '' );
+        $delivery_raw  = (string) ( $services['delivery'] ?? '' );
+        $callback_raw  = ! empty( $services['callback'] );
+
+        $installer_val = match ( $installer_raw ) {
+            'yes' => $is_fr ? 'Oui' : 'Yes',
+            'no'  => $is_fr ? 'Non' : 'No',
+            default => '—',
+        };
+
+        $delivery_val = match ( $delivery_raw ) {
+            'delivery' => $is_fr ? 'Livraison à domicile' : 'Home delivery',
+            'pickup'   => $is_fr ? 'Cueillette en magasin' : 'In-store pickup',
+            default    => '—',
+        };
+
+        $callback_val = $callback_raw
+            ? ( $is_fr ? 'Oui' : 'Yes' )
+            : ( $is_fr ? 'Non' : 'No' );
+
+        $services_text = ( $is_fr ? 'Installateur: ' : 'Installer: ' ) . $installer_val
+            . ' | ' . ( $is_fr ? 'Livraison: ' : 'Delivery: ' ) . $delivery_val
+            . ' | ' . ( $is_fr ? 'Rappel: ' : 'Callback: ' ) . $callback_val;
+
+        $order_id = (int) ( $quote['order_id'] ?? 0 );
+        $order_link = $order_id
+            ? '<a href="' . esc_url( wc_get_endpoint_url( 'view-order', $order_id, wc_get_page_permalink( 'myaccount' ) ) ) . '">#' . $order_id . '</a>'
+            : '—';
+
+        echo '<tr>';
+        echo '<td>' . $date . '</td>';
+        echo '<td>' . $client_name . '</td>';
+        echo '<td>' . $total . '</td>';
+        echo '<td>' . $items_list . '</td>';
+        echo '<td>' . $services_text . '</td>';
+        echo '<td>' . $order_link . '</td>';
+        echo '<td><button type="button" class="button" onclick="slwizPrintQuote(' . intval( $idx ) . ')">' . ( $is_fr ? 'Imprimer' : 'Print' ) . '</button></td>';
+        echo '</tr>';
+    }
+    echo '</tbody></table>';
+
+    $quotes_json = wp_json_encode( array_values( $quotes ) );
+    $print_title = $is_fr ? 'Détail du devis' : 'Quote details';
+    $print_btn   = $is_fr ? 'Imprimer' : 'Print';
+    $close_btn   = $is_fr ? 'Fermer' : 'Close';
+
+    echo '<script>';
+    echo 'window.slwizQuotes = ' . $quotes_json . ';';
+    echo 'function slwizEsc(s){return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/\'/g,"&#39;");}';
+    echo 'function slwizPrintQuote(i){var q=(window.slwizQuotes||[])[i]; if(!q) return;';
+    echo 'var items=(q.items||[]).map(function(it){var qty=Number(it.qty||1);var price=Number(it.price||0);return "<tr><td>"+slwizEsc(it.name)+"</td><td style=\"text-align:center\">"+qty+"</td><td style=\"text-align:right\">"+slwizEsc((q.currency||"$")+ (qty*price).toFixed(2))+"</td></tr>";}).join("");';
+    echo 'var w=window.open("","_blank","width=860,height=760"); if(!w) return;';
+    echo 'w.document.write("<!doctype html><html><head><title>' . esc_js( $print_title ) . '</title><style>body{font-family:Arial,sans-serif;padding:20px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #ddd;padding:8px}th{background:#f3f3f3} .bar{margin-top:14px;display:flex;gap:8px}</style></head><body>");';
+    echo 'w.document.write("<h2>' . esc_js( $print_title ) . '</h2>");';
+    echo 'w.document.write("<p><strong>Date:</strong> "+slwizEsc(q.created_at||"—")+"<br><strong>Client:</strong> "+slwizEsc(q.client_name||"—")+"<br><strong>Total:</strong> "+slwizEsc((q.currency||"$")+Number(q.grand_total||0).toFixed(2))+"</p>");';
+    echo 'w.document.write("<table><thead><tr><th>' . ( $is_fr ? 'Produit' : 'Product' ) . '</th><th>Qté</th><th>' . ( $is_fr ? 'Montant' : 'Amount' ) . '</th></tr></thead><tbody>"+items+"</tbody></table>");';
+    echo 'w.document.write("<p><strong>Services:</strong> "+slwizEsc(JSON.stringify(q.services||{}))+"</p>");';
+    echo 'w.document.write("<div class=\"bar\"><button onclick=\"window.print()\">' . esc_js( $print_btn ) . '</button><button onclick=\"window.close()\">' . esc_js( $close_btn ) . '</button></div>");';
+    echo 'w.document.write("</body></html>"); w.document.close();}';
+    echo '</script>';
+}
+
+/**
+ * Détermine la langue de la page courante.
+ * Priorité: Polylang > locale WP > fallback FR.
+ *
+ * @return string "fr" ou "en"
+ */
+function slwiz_get_current_lang() {
+    $lang = '';
+
+    if ( function_exists( 'pll_current_language' ) ) {
+        $lang = (string) pll_current_language( 'slug' );
+    }
+
+    if ( '' === $lang ) {
+        $lang = (string) determine_locale();
+    }
+
+    $lang = strtolower( $lang );
+
+    if ( str_starts_with( $lang, 'en' ) ) {
+        return 'en';
+    }
+
+    return 'fr';
 }
