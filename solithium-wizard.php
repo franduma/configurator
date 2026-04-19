@@ -130,7 +130,7 @@ function slwiz_add_quotes_menu_item( $items ) {
     $logout = $items['customer-logout'] ?? null;
     unset( $items['customer-logout'] );
 
-    $items['slwiz-devis'] = __( 'Quotes', 'solithium-wizard' );
+    $items['slwiz-devis'] = slwiz_get_current_lang() === 'fr' ? __( 'Devis', 'solithium-wizard' ) : __( 'Quotes', 'solithium-wizard' );
 
     if ( null !== $logout ) {
         $items['customer-logout'] = $logout;
@@ -141,20 +141,25 @@ function slwiz_add_quotes_menu_item( $items ) {
 
 add_action( 'woocommerce_account_slwiz-devis_endpoint', 'slwiz_render_account_quotes' );
 function slwiz_render_account_quotes() {
+    $is_fr = slwiz_get_current_lang() === 'fr';
+
     if ( ! is_user_logged_in() ) {
-        echo '<p>Vous devez être connecté.</p>';
+        echo $is_fr ? '<p>Vous devez être connecté.</p>' : '<p>You must be logged in.</p>';
         return;
     }
 
     $quotes = get_user_meta( get_current_user_id(), 'slwiz_quotes', true );
     if ( ! is_array( $quotes ) || empty( $quotes ) ) {
-        echo '<p>No saved quotes yet.</p>';
+        echo $is_fr ? '<p>Aucun devis enregistré pour le moment.</p>' : '<p>No saved quotes yet.</p>';
         return;
     }
 
-    echo '<h3>My latest quotes (max 10)</h3>';
+    echo $is_fr ? '<h3>Mes derniers devis (max 10)</h3>' : '<h3>My latest quotes (max 10)</h3>';
     echo '<table class="shop_table shop_table_responsive my_account_orders"><thead><tr>';
-    echo '<th>Date</th><th>Client Name</th><th>Total</th><th>Items</th><th>Services</th><th>Order</th></tr></thead><tbody>';
+    echo $is_fr
+        ? '<th>Date</th><th>Nom du client</th><th>Total</th><th>Produits</th><th>Services</th><th>Commande</th>'
+        : '<th>Date</th><th>Client Name</th><th>Total</th><th>Items</th><th>Services</th><th>Order</th>';
+    echo '</tr></thead><tbody>';
 
     foreach ( $quotes as $quote ) {
         $date = esc_html( $quote['created_at'] ?? '—' );
@@ -171,9 +176,29 @@ function slwiz_render_account_quotes() {
         if ( '' === $items_list ) $items_list = '—';
 
         $services = is_array( $quote['services'] ?? null ) ? $quote['services'] : [];
-        $services_text = 'Installer: ' . esc_html( (string) ( $services['installer'] ?? '—' ) )
-            . ' | Delivery: ' . esc_html( (string) ( $services['delivery'] ?? '—' ) )
-            . ' | Callback: ' . ( ! empty( $services['callback'] ) ? 'yes' : 'no' );
+        $installer_raw = (string) ( $services['installer'] ?? '' );
+        $delivery_raw  = (string) ( $services['delivery'] ?? '' );
+        $callback_raw  = ! empty( $services['callback'] );
+
+        $installer_val = match ( $installer_raw ) {
+            'yes' => $is_fr ? 'Oui' : 'Yes',
+            'no'  => $is_fr ? 'Non' : 'No',
+            default => '—',
+        };
+
+        $delivery_val = match ( $delivery_raw ) {
+            'delivery' => $is_fr ? 'Livraison à domicile' : 'Home delivery',
+            'pickup'   => $is_fr ? 'Cueillette en magasin' : 'In-store pickup',
+            default    => '—',
+        };
+
+        $callback_val = $callback_raw
+            ? ( $is_fr ? 'Oui' : 'Yes' )
+            : ( $is_fr ? 'Non' : 'No' );
+
+        $services_text = ( $is_fr ? 'Installateur: ' : 'Installer: ' ) . $installer_val
+            . ' | ' . ( $is_fr ? 'Livraison: ' : 'Delivery: ' ) . $delivery_val
+            . ' | ' . ( $is_fr ? 'Rappel: ' : 'Callback: ' ) . $callback_val;
 
         $order_id = (int) ( $quote['order_id'] ?? 0 );
         $order_link = $order_id

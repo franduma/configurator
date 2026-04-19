@@ -634,7 +634,7 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 
             <!-- Notes additionnelles -->
             <div class="slwiz-group">
-                <h3 x-text="__('clientNameTitle')"></h3>
+                <h3 x-text="lang === 'fr' ? 'Nom du client' : 'Client Name'"></h3>
                 <input type="text" x-model="clientName" class="slwiz-input" required
                        :placeholder="__('clientNamePlaceholder')">
             </div>

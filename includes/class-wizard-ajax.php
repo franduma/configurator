@@ -317,7 +317,7 @@ class Solithium_Ajax {
 
         // Infos client
         $user       = is_user_logged_in() ? wp_get_current_user() : null;
-        $posted_client_name = self::get_post( 'client_name', '' );
+        $posted_client_name = trim( (string) self::get_post( 'client_name', '' ) );
         $client_name  = $posted_client_name ?: ( $user ? trim( $user->first_name . ' ' . $user->last_name ) : '' );
         $client_email = $user ? $user->user_email : self::get_post( 'client_email', '' );
         if ( ! $client_name ) $client_name = $user ? $user->display_name : '—';
@@ -537,6 +537,11 @@ class Solithium_Ajax {
             $links_html .= '</p>';
         }
 
+        $customer_service_block = "<div style='background:#f7f9fb;border:1px solid #dfe6ee;padding:12px 16px;margin-top:14px;border-radius:4px'>"
+            . '<strong>' . ( $fr ? 'Service à la clientèle' : 'Customer Service' ) . "</strong><br>"
+            . esc_html( (string) ( $d['phone'] ?? '' ) )
+            . "<br><strong>Solithium</strong></div>";
+
         return "<!DOCTYPE html><html><body style='font-family:Arial,sans-serif;color:#222;max-width:600px;margin:auto'>
 <div style='background:#1a2332;padding:20px 30px'>
   <h1 style='color:#f5a623;margin:0;font-size:1.3rem'>☀ Solithium</h1>
@@ -561,6 +566,7 @@ class Solithium_Ajax {
   </div>
   <p style='font-size:.9rem;color:#666'>{$phone}</p>
   <p style='font-size:.9rem;color:#666'>" . ( $fr ? 'Merci de votre confiance !' : 'Thank you for your trust!' ) . "</p>
+  {$customer_service_block}
 </div>
 <div style='background:#f5f5f5;padding:12px 30px;font-size:.8rem;color:#999'>
   Solithium 2 · " . get_site_url() . "
