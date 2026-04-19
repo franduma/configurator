@@ -317,7 +317,8 @@ class Solithium_Ajax {
 
         // Infos client
         $user       = is_user_logged_in() ? wp_get_current_user() : null;
-        $client_name  = $user ? trim( $user->first_name . ' ' . $user->last_name ) : self::get_post( 'client_name', '' );
+        $posted_client_name = self::get_post( 'client_name', '' );
+        $client_name  = $posted_client_name ?: ( $user ? trim( $user->first_name . ' ' . $user->last_name ) : '' );
         $client_email = $user ? $user->user_email : self::get_post( 'client_email', '' );
         if ( ! $client_name ) $client_name = $user ? $user->display_name : '—';
 
@@ -359,6 +360,7 @@ class Solithium_Ajax {
                 'items'       => $all_items,
                 'services'    => $services,
                 'order_id'    => $order_id,
+                'client_name' => $client_name,
             ] );
         }
 
@@ -382,11 +384,15 @@ class Solithium_Ajax {
             'order_id'     => $order_id,
         ]);
 
-        wp_mail( $notif_to, $subject_solithium, $body_solithium, [
+        $headers_solithium = [
             'Content-Type: text/html; charset=UTF-8',
             "From: {$site_name} <{$notif_to}>",
-            "Reply-To: {$client_email}",
-        ]);
+        ];
+        if ( is_email( $client_email ) ) {
+            $headers_solithium[] = "Reply-To: {$client_email}";
+        }
+
+        wp_mail( $notif_to, $subject_solithium, $body_solithium, $headers_solithium );
 
         // Courriel de confirmation — client
         if ( $client_email ) {
@@ -686,7 +692,7 @@ class Solithium_Ajax {
     }
 
     /**
-     * Sauvegarde le devis dans le compte utilisateur (max 3).
+     * Sauvegarde le devis dans le compte utilisateur (max 10).
      */
     private static function save_user_quote( int $user_id, array $quote ): void {
         if ( $user_id <= 0 ) {
@@ -699,7 +705,7 @@ class Solithium_Ajax {
         }
 
         array_unshift( $quotes, $quote );
-        $quotes = array_slice( $quotes, 0, 3 );
+        $quotes = array_slice( $quotes, 0, 10 );
 
         update_user_meta( $user_id, 'slwiz_quotes', $quotes );
     }

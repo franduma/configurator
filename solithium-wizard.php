@@ -97,6 +97,7 @@ function slwiz_enqueue() {
         'ajaxUrl'          => admin_url( 'admin-ajax.php' ),
         'nonce'            => wp_create_nonce( 'slwiz_nonce' ),
         'isLoggedIn'       => is_user_logged_in() ? 1 : 0,
+        'currentUserName'  => is_user_logged_in() ? wp_get_current_user()->display_name : '',
         'currentLang'      => slwiz_get_current_lang(),
         'loginUrl'         => wp_login_url( get_permalink() ),
         'demoMode'         => SLWIZ_DEMO_MODE ? 1 : 0,
@@ -129,7 +130,7 @@ function slwiz_add_quotes_menu_item( $items ) {
     $logout = $items['customer-logout'] ?? null;
     unset( $items['customer-logout'] );
 
-    $items['slwiz-devis'] = __( 'Devis', 'solithium-wizard' );
+    $items['slwiz-devis'] = __( 'Quotes', 'solithium-wizard' );
 
     if ( null !== $logout ) {
         $items['customer-logout'] = $logout;
@@ -147,18 +148,33 @@ function slwiz_render_account_quotes() {
 
     $quotes = get_user_meta( get_current_user_id(), 'slwiz_quotes', true );
     if ( ! is_array( $quotes ) || empty( $quotes ) ) {
-        echo '<p>Aucun devis enregistré pour le moment.</p>';
+        echo '<p>No saved quotes yet.</p>';
         return;
     }
 
-    echo '<h3>Mes 3 derniers devis</h3>';
+    echo '<h3>My latest quotes (max 10)</h3>';
     echo '<table class="shop_table shop_table_responsive my_account_orders"><thead><tr>';
-    echo '<th>Date</th><th>Total</th><th>Produits</th><th>Commande</th></tr></thead><tbody>';
+    echo '<th>Date</th><th>Client Name</th><th>Total</th><th>Items</th><th>Services</th><th>Order</th></tr></thead><tbody>';
 
     foreach ( $quotes as $quote ) {
         $date = esc_html( $quote['created_at'] ?? '—' );
         $total = esc_html( ( $quote['currency'] ?? '$' ) . number_format( (float) ( $quote['grand_total'] ?? 0 ), 2 ) );
-        $items_count = is_array( $quote['items'] ?? null ) ? count( $quote['items'] ) : 0;
+        $client_name = esc_html( $quote['client_name'] ?? '—' );
+        $items_list = '';
+        if ( is_array( $quote['items'] ?? null ) ) {
+            foreach ( $quote['items'] as $item ) {
+                $n = esc_html( (string) ( $item['name'] ?? '' ) );
+                $q = (int) ( $item['qty'] ?? 1 );
+                $items_list .= '<div>' . $n . ( $q > 1 ? ' × ' . $q : '' ) . '</div>';
+            }
+        }
+        if ( '' === $items_list ) $items_list = '—';
+
+        $services = is_array( $quote['services'] ?? null ) ? $quote['services'] : [];
+        $services_text = 'Installer: ' . esc_html( (string) ( $services['installer'] ?? '—' ) )
+            . ' | Delivery: ' . esc_html( (string) ( $services['delivery'] ?? '—' ) )
+            . ' | Callback: ' . ( ! empty( $services['callback'] ) ? 'yes' : 'no' );
+
         $order_id = (int) ( $quote['order_id'] ?? 0 );
         $order_link = $order_id
             ? '<a href="' . esc_url( wc_get_endpoint_url( 'view-order', $order_id, wc_get_page_permalink( 'myaccount' ) ) ) . '">#' . $order_id . '</a>'
@@ -166,8 +182,10 @@ function slwiz_render_account_quotes() {
 
         echo '<tr>';
         echo '<td>' . $date . '</td>';
+        echo '<td>' . $client_name . '</td>';
         echo '<td>' . $total . '</td>';
-        echo '<td>' . intval( $items_count ) . '</td>';
+        echo '<td>' . $items_list . '</td>';
+        echo '<td>' . $services_text . '</td>';
         echo '<td>' . $order_link . '</td>';
         echo '</tr>';
     }

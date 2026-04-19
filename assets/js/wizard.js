@@ -148,6 +148,8 @@ const SLWIZ_STRINGS = {
     callbackYes: 'Je souhaite être rappelé(e) par l\'équipe Solithium',
     callbackPhone: 'Votre numéro de téléphone',
     callbackPhonePlaceholder: 'ex. 514-555-0100',
+    clientNameTitle: 'Nom du client',
+    clientNamePlaceholder: 'Nom complet du client (saisi manuellement)',
     notesTitle: 'Notes additionnelles (optionnel)',
     notesPlaceholder: 'Questions, contraintes particulières, dates souhaitées…',
     summaryTitle: 'Récapitulatif de votre commande',
@@ -294,6 +296,8 @@ const SLWIZ_STRINGS = {
     callbackYes: 'I would like the Solithium team to call me back',
     callbackPhone: 'Your phone number',
     callbackPhonePlaceholder: 'e.g. 514-555-0100',
+    clientNameTitle: 'Client name',
+    clientNamePlaceholder: 'Customer full name (manual entry)',
     notesTitle: 'Additional notes (optional)',
     notesPlaceholder: 'Questions, special constraints, preferred dates…',
     summaryTitle: 'Your order summary',
@@ -431,6 +435,7 @@ function solithiumWizard() {
     serviceCallback:  false,
     servicePhone:     '',
     serviceNotes:     '',
+    clientName:       '',
 
     /* ── TOTAL FINAL ──────────────────────── */
     grandTotal:   0,
@@ -810,7 +815,7 @@ function solithiumWizard() {
         services:          JSON.stringify(services),
         grand_total:       this.grandTotal,
         client_email:      this.regEmail,
-        client_name:       `${this.regFirstName} ${this.regLastName}`.trim(),
+        client_name:       this.clientName || `${this.regFirstName} ${this.regLastName}`.trim(),
       };
 
       try {
