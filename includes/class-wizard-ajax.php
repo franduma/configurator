@@ -318,9 +318,8 @@ class Solithium_Ajax {
         // Infos client
         $user       = is_user_logged_in() ? wp_get_current_user() : null;
         $posted_client_name = trim( (string) self::get_post( 'client_name', '' ) );
-        $client_name  = $posted_client_name ?: ( $user ? trim( $user->first_name . ' ' . $user->last_name ) : '' );
+        $client_name  = $posted_client_name !== '' ? $posted_client_name : '—';
         $client_email = $user ? $user->user_email : self::get_post( 'client_email', '' );
-        if ( ! $client_name ) $client_name = $user ? $user->display_name : '—';
 
         // Normaliser les lignes pour éviter un total vide en cas de payload incomplet
         $all_items = array_merge( $items, $accessories );

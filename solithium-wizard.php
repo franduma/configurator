@@ -157,11 +157,11 @@ function slwiz_render_account_quotes() {
     echo $is_fr ? '<h3>Mes derniers devis (max 10)</h3>' : '<h3>My latest quotes (max 10)</h3>';
     echo '<table class="shop_table shop_table_responsive my_account_orders"><thead><tr>';
     echo $is_fr
-        ? '<th>Date</th><th>Nom du client</th><th>Total</th><th>Produits</th><th>Services</th><th>Commande</th>'
-        : '<th>Date</th><th>Client Name</th><th>Total</th><th>Items</th><th>Services</th><th>Order</th>';
+        ? '<th>Date</th><th>Nom du client</th><th>Total</th><th>Produits</th><th>Services</th><th>Commande</th><th>Actions</th>'
+        : '<th>Date</th><th>Client Name</th><th>Total</th><th>Items</th><th>Services</th><th>Order</th><th>Actions</th>';
     echo '</tr></thead><tbody>';
 
-    foreach ( $quotes as $quote ) {
+    foreach ( $quotes as $idx => $quote ) {
         $date = esc_html( $quote['created_at'] ?? '—' );
         $total = esc_html( ( $quote['currency'] ?? '$' ) . number_format( (float) ( $quote['grand_total'] ?? 0 ), 2 ) );
         $client_name = esc_html( $quote['client_name'] ?? '—' );
@@ -212,9 +212,30 @@ function slwiz_render_account_quotes() {
         echo '<td>' . $items_list . '</td>';
         echo '<td>' . $services_text . '</td>';
         echo '<td>' . $order_link . '</td>';
+        echo '<td><button type="button" class="button" onclick="slwizPrintQuote(' . intval( $idx ) . ')">' . ( $is_fr ? 'Imprimer' : 'Print' ) . '</button></td>';
         echo '</tr>';
     }
     echo '</tbody></table>';
+
+    $quotes_json = wp_json_encode( array_values( $quotes ) );
+    $print_title = $is_fr ? 'Détail du devis' : 'Quote details';
+    $print_btn   = $is_fr ? 'Imprimer' : 'Print';
+    $close_btn   = $is_fr ? 'Fermer' : 'Close';
+
+    echo '<script>';
+    echo 'window.slwizQuotes = ' . $quotes_json . ';';
+    echo 'function slwizEsc(s){return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/\'/g,"&#39;");}';
+    echo 'function slwizPrintQuote(i){var q=(window.slwizQuotes||[])[i]; if(!q) return;';
+    echo 'var items=(q.items||[]).map(function(it){var qty=Number(it.qty||1);var price=Number(it.price||0);return "<tr><td>"+slwizEsc(it.name)+"</td><td style=\"text-align:center\">"+qty+"</td><td style=\"text-align:right\">"+slwizEsc((q.currency||"$")+ (qty*price).toFixed(2))+"</td></tr>";}).join("");';
+    echo 'var w=window.open("","_blank","width=860,height=760"); if(!w) return;';
+    echo 'w.document.write("<!doctype html><html><head><title>' . esc_js( $print_title ) . '</title><style>body{font-family:Arial,sans-serif;padding:20px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #ddd;padding:8px}th{background:#f3f3f3} .bar{margin-top:14px;display:flex;gap:8px}</style></head><body>");';
+    echo 'w.document.write("<h2>' . esc_js( $print_title ) . '</h2>");';
+    echo 'w.document.write("<p><strong>Date:</strong> "+slwizEsc(q.created_at||"—")+"<br><strong>Client:</strong> "+slwizEsc(q.client_name||"—")+"<br><strong>Total:</strong> "+slwizEsc((q.currency||"$")+Number(q.grand_total||0).toFixed(2))+"</p>");';
+    echo 'w.document.write("<table><thead><tr><th>' . ( $is_fr ? 'Produit' : 'Product' ) . '</th><th>Qté</th><th>' . ( $is_fr ? 'Montant' : 'Amount' ) . '</th></tr></thead><tbody>"+items+"</tbody></table>");';
+    echo 'w.document.write("<p><strong>Services:</strong> "+slwizEsc(JSON.stringify(q.services||{}))+"</p>");';
+    echo 'w.document.write("<div class=\"bar\"><button onclick=\"window.print()\">' . esc_js( $print_btn ) . '</button><button onclick=\"window.close()\">' . esc_js( $close_btn ) . '</button></div>");';
+    echo 'w.document.write("</body></html>"); w.document.close();}';
+    echo '</script>';
 }
 
 /**
