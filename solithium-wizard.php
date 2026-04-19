@@ -17,7 +17,7 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 define( 'SLWIZ_VERSION',  '1.1.0' );
 define( 'SLWIZ_DIR',      plugin_dir_path( __FILE__ ) );
 define( 'SLWIZ_URL',      plugin_dir_url( __FILE__ ) );
-define( 'SLWIZ_DEMO_MODE', true ); // true = catalogue fictif; false = produits WooCommerce réels
+define( 'SLWIZ_DEMO_MODE', false ); // true = catalogue fictif; false = produits WooCommerce réels
 
 /* ───────────────────────────────────────────────
    CHARGEMENT DES CLASSES / LOAD CLASSES
@@ -47,6 +47,13 @@ function slwiz_activate() {
     ) {$charset};";
     require_once ABSPATH . 'wp-admin/includes/upgrade.php';
     dbDelta( $sql );
+    slwiz_register_account_endpoint();
+    flush_rewrite_rules();
+}
+
+register_deactivation_hook( __FILE__, 'slwiz_deactivate' );
+function slwiz_deactivate() {
+    flush_rewrite_rules();
 }
 
 /* ───────────────────────────────────────────────
@@ -90,6 +97,7 @@ function slwiz_enqueue() {
         'ajaxUrl'          => admin_url( 'admin-ajax.php' ),
         'nonce'            => wp_create_nonce( 'slwiz_nonce' ),
         'isLoggedIn'       => is_user_logged_in() ? 1 : 0,
+        'currentLang'      => slwiz_get_current_lang(),
         'loginUrl'         => wp_login_url( get_permalink() ),
         'demoMode'         => SLWIZ_DEMO_MODE ? 1 : 0,
         'currency'         => function_exists( 'get_woocommerce_currency_symbol' ) ? get_woocommerce_currency_symbol() : '$',
@@ -106,4 +114,88 @@ function slwiz_enqueue() {
         [],
         SLWIZ_VERSION
     );
+}
+
+/* ───────────────────────────────────────────────
+   COMPTE WOOCOMMERCE — SECTION DEVIS
+─────────────────────────────────────────────── */
+add_action( 'init', 'slwiz_register_account_endpoint' );
+function slwiz_register_account_endpoint() {
+    add_rewrite_endpoint( 'slwiz-devis', EP_ROOT | EP_PAGES );
+}
+
+add_filter( 'woocommerce_account_menu_items', 'slwiz_add_quotes_menu_item' );
+function slwiz_add_quotes_menu_item( $items ) {
+    $logout = $items['customer-logout'] ?? null;
+    unset( $items['customer-logout'] );
+
+    $items['slwiz-devis'] = __( 'Devis', 'solithium-wizard' );
+
+    if ( null !== $logout ) {
+        $items['customer-logout'] = $logout;
+    }
+
+    return $items;
+}
+
+add_action( 'woocommerce_account_slwiz-devis_endpoint', 'slwiz_render_account_quotes' );
+function slwiz_render_account_quotes() {
+    if ( ! is_user_logged_in() ) {
+        echo '<p>Vous devez être connecté.</p>';
+        return;
+    }
+
+    $quotes = get_user_meta( get_current_user_id(), 'slwiz_quotes', true );
+    if ( ! is_array( $quotes ) || empty( $quotes ) ) {
+        echo '<p>Aucun devis enregistré pour le moment.</p>';
+        return;
+    }
+
+    echo '<h3>Mes 3 derniers devis</h3>';
+    echo '<table class="shop_table shop_table_responsive my_account_orders"><thead><tr>';
+    echo '<th>Date</th><th>Total</th><th>Produits</th><th>Commande</th></tr></thead><tbody>';
+
+    foreach ( $quotes as $quote ) {
+        $date = esc_html( $quote['created_at'] ?? '—' );
+        $total = esc_html( ( $quote['currency'] ?? '$' ) . number_format( (float) ( $quote['grand_total'] ?? 0 ), 2 ) );
+        $items_count = is_array( $quote['items'] ?? null ) ? count( $quote['items'] ) : 0;
+        $order_id = (int) ( $quote['order_id'] ?? 0 );
+        $order_link = $order_id
+            ? '<a href="' . esc_url( wc_get_endpoint_url( 'view-order', $order_id, wc_get_page_permalink( 'myaccount' ) ) ) . '">#' . $order_id . '</a>'
+            : '—';
+
+        echo '<tr>';
+        echo '<td>' . $date . '</td>';
+        echo '<td>' . $total . '</td>';
+        echo '<td>' . intval( $items_count ) . '</td>';
+        echo '<td>' . $order_link . '</td>';
+        echo '</tr>';
+    }
+    echo '</tbody></table>';
+}
+
+/**
+ * Détermine la langue de la page courante.
+ * Priorité: Polylang > locale WP > fallback FR.
+ *
+ * @return string "fr" ou "en"
+ */
+function slwiz_get_current_lang() {
+    $lang = '';
+
+    if ( function_exists( 'pll_current_language' ) ) {
+        $lang = (string) pll_current_language( 'slug' );
+    }
+
+    if ( '' === $lang ) {
+        $lang = (string) determine_locale();
+    }
+
+    $lang = strtolower( $lang );
+
+    if ( str_starts_with( $lang, 'en' ) ) {
+        return 'en';
+    }
+
+    return 'fr';
 }
